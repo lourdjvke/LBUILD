@@ -20,7 +20,7 @@ export function Navbar({ onScrollTo, onQuickBuild, isBuilding }: NavbarProps) {
           </div>
           <div className="flex flex-col">
             <span className="font-bold text-lg tracking-tight text-[#1F1E1D] leading-none">
-              LARP
+              Larp v1.1
             </span>
             <span className="text-[11px] text-[#8C867D] font-medium leading-tight">
               Capacitor Bundler Engine
