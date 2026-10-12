@@ -32,7 +32,13 @@ export interface GithubBridgeResult {
 export async function runGithubActionsBuild(options: GithubBridgeOptions): Promise<GithubBridgeResult> {
   const { username, token, config, processedFiles } = options;
   const rawRepo = options.repoName || config.repo || config.repoId || config.repoName;
-  const repoName = (rawRepo && rawRepo.trim().length > 0) ? rawRepo.trim() : 'larp-android-app-v6';
+  const repoName = rawRepo?.trim();
+  if (!repoName || !/^[A-Za-z0-9_.-]+$/.test(repoName)) {
+    throw new Error('A valid GitHub repository name is required (letters, numbers, ., _, and - only)');
+  }
+  if (!/^[A-Za-z0-9-]+$/.test(username)) {
+    throw new Error('A valid GitHub username or organization is required');
+  }
   const logs: string[] = [];
   const safeAppName = config.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'larp_app';
   const expectedApkFilename = `${safeAppName}_signed_release.apk`;
@@ -51,15 +57,16 @@ export async function runGithubActionsBuild(options: GithubBridgeOptions): Promi
   let runId: number | undefined;
   let runConclusion: string | undefined;
   let githubArtifactId: number | undefined;
+  let defaultBranch = 'main';
   let githubArtifactSize: number | undefined;
   let optionsResult: Partial<Pick<GithubBridgeResult, 'apkFilename' | 'apkBase64' | 'artifactZipBase64' | 'artifactName'>> = {};
 
   try {
     // 1. Ensure repository exists
-    const repoCheckRes = await fetch(`https://api.github.com/repos/${username}/${repoName}`, { headers });
+    const repoCheckRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(username)}/${encodeURIComponent(repoName)}`, { headers });
     if (repoCheckRes.status === 404) {
       logs.push(`[GitHub Bridge] Creating repo "${repoName}" for ${username}...`);
-      await fetch(`https://api.github.com/user/repos`, {
+      const createRes = await fetch(`https://api.github.com/user/repos`, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -69,9 +76,18 @@ export async function runGithubActionsBuild(options: GithubBridgeOptions): Promi
           auto_init: true,
         }),
       });
-      logs.push(`[GitHub Bridge] Repo "${repoName}" created.`);
+      if (!createRes.ok) {
+        throw new Error(`GitHub repository lookup/create failed (${createRes.status}): ${await createRes.text()}`);
+      }
+      const createdRepo = await createRes.json();
+      defaultBranch = createdRepo.default_branch || defaultBranch;
+      logs.push(`[GitHub Bridge] Repo "${repoName}" created on branch "${defaultBranch}".`);
+    } else if (repoCheckRes.ok) {
+      const repository = await repoCheckRes.json();
+      defaultBranch = repository.default_branch || defaultBranch;
+      logs.push(`[GitHub Bridge] Connected to repo: ${repoUrl} (default branch: ${defaultBranch})`);
     } else {
-      logs.push(`[GitHub Bridge] Connected to repo: ${repoUrl}`);
+      throw new Error(`GitHub repository lookup failed (${repoCheckRes.status}): ${await repoCheckRes.text()}`);
     }
 
     // 2. Commit files to trigger GitHub Actions
@@ -171,7 +187,7 @@ export async function runGithubActionsBuild(options: GithubBridgeOptions): Promi
     const dispatchRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/actions/workflows/larp-build.yml/dispatches`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref: 'main' }),
+      body: JSON.stringify({ ref: defaultBranch }),
     });
 
     if (dispatchRes.status === 204) {
@@ -189,7 +205,7 @@ export async function runGithubActionsBuild(options: GithubBridgeOptions): Promi
         const runsRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/actions/runs?workflow_id=larp-build.yml&event=workflow_dispatch&per_page=20`, { headers });
         if (!runsRes.ok) continue;
         const runsData = await runsRes.json();
-        const run = runsData.workflow_runs?.find((candidate: any) => candidate.created_at >= dispatchStartedAt && candidate.head_branch === 'main');
+        const run = runsData.workflow_runs?.find((candidate: any) => candidate.created_at >= dispatchStartedAt && candidate.head_branch === defaultBranch);
         if (run) {
           return {
             success: true,
@@ -221,7 +237,7 @@ export async function runGithubActionsBuild(options: GithubBridgeOptions): Promi
 
       const runsData = await runsRes.json();
       const latestRun = runsData.workflow_runs?.find((run: any) =>
-        run.created_at >= dispatchStartedAt && run.head_branch === 'main'
+        run.created_at >= dispatchStartedAt && run.head_branch === defaultBranch
       );
       if (!latestRun) continue;
 
