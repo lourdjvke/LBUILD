@@ -155,30 +155,46 @@ export async function runGithubActionsBuild(options: GithubBridgeOptions): Promi
       }
     } catch (_) {}
 
+    const commitFailures: string[] = [];
     for (const file of filesToCommit) {
       try {
-        const existing = await fetch(`https://api.github.com/repos/${username}/${repoName}/contents/${file.path}`, { headers });
+        const existing = await fetch(`https://api.github.com/repos/${encodeURIComponent(username)}/${encodeURIComponent(repoName)}/contents/${file.path}`, { headers });
         let sha: string | undefined;
         if (existing.ok) {
           const data = await existing.json();
           sha = data.sha;
+        } else if (existing.status !== 404) {
+          const body = await existing.text();
+          throw new Error(`lookup failed (${existing.status}): ${body.slice(0, 300)}`);
         }
 
-        const putRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/contents/${file.path}`, {
+        const putRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(username)}/${encodeURIComponent(repoName)}/contents/${file.path}`, {
           method: 'PUT',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: `[LARP API Middleman] Commit ${file.path}`,
             content: file.content,
             sha,
+            branch: defaultBranch,
           }),
         });
-        if (putRes.ok) {
-          logs.push(`[GitHub Bridge] Synced ${file.path}`);
+        if (!putRes.ok) {
+          const body = await putRes.text();
+          throw new Error(`write failed (${putRes.status}): ${body.slice(0, 300)}`);
         }
+        logs.push(`[GitHub Bridge] Synced ${file.path}`);
       } catch (commitErr: any) {
-        logs.push(`[GitHub Bridge Notice] Commit ${file.path}: ${commitErr.message}`);
+        const failure = `${file.path}: ${commitErr?.message || 'unknown GitHub API error'}`;
+        commitFailures.push(failure);
+        logs.push(`[GitHub Actions Bridge Error] ${failure}`);
       }
+    }
+
+    // Never dispatch a workflow when its YAML or project files were not written.
+    // Previously these failures were swallowed, which made the API appear queued
+    // even though GitHub had nothing valid to build.
+    if (commitFailures.length > 0) {
+      throw new Error(`GitHub file write failed for ${commitFailures.length} file(s): ${commitFailures.slice(0, 3).join('; ')}`);
     }
 
     // 3. Dispatch workflow explicitly
