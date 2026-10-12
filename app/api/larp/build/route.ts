@@ -326,10 +326,15 @@ export async function POST(req: NextRequest) {
 
     // 1. GITHUB DELEGATION IS THE DEFAULT BUILD PIPELINE (Optimized for Vercel & Serverless)
     let githubResult: any = null;
-    if (username && accessToken) {
+    const hasGithubInput = Boolean(username || accessToken || repo);
+    if (hasGithubInput && (!username || !accessToken || !repo)) {
+      throw new Error('GitHub build requires username, accessToken, and repo. Send them in the JSON body or x-github-* headers.');
+    }
+
+    if (username && accessToken && repo) {
+      const repoName = repo;
       try {
-        const repoName = repo || `larp-android-${config.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
-        console.log(`[LARP Build API] Default CI/CD Delegation: Dispatching to GitHub Actions (${username}/${repoName})...`);
+        console.log(`[LARP Build API] Writing GitHub workflow before dispatch (${username}/${repoName})...`);
         githubResult = await runGithubActionsBuild({
           username,
           token: accessToken,
@@ -349,7 +354,14 @@ export async function POST(req: NextRequest) {
           statusUrl: `${baseUrl}/api/larp/status?id=${encodeURIComponent(queuedBuildId)}`,
         }, { status: 202, headers: CORS_HEADERS });
       } catch (ghErr: any) {
-        console.warn('[LARP Build API] GitHub CI bridge notice:', ghErr.message);
+        console.error('[LARP Build API GitHub Error]', ghErr);
+        return NextResponse.json({
+          success: false,
+          stage: 'github_write_or_dispatch',
+          error: 'GitHub workflow setup failed before the build could start.',
+          details: ghErr?.message || 'Unknown GitHub API error',
+          hint: 'Verify the token can write repository contents and dispatch GitHub Actions, and that username/repo identify the target repository.',
+        }, { status: 502, headers: CORS_HEADERS });
       }
     }
 
