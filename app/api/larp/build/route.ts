@@ -503,8 +503,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         success: false,
+        stage: 'request_or_build',
         error: err.message || 'Build compilation failed',
-        details: err.stack,
+        details: 'The request was not completed. Check stage and error, then retry with the same payload after correcting the reported issue.',
       },
       {
         status: 500,
