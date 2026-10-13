@@ -2,7 +2,7 @@ import type {Metadata} from 'next';
 import './globals.css'; // Global styles
 
 export const metadata: Metadata = {
-  title: 'LARP - Offline Web-to-Native App Bundler API',
+  title: 'Larp v1.1 — Touch me not reference app',
   description: 'Capacitor-powered bundler API and console that packages static HTML/CSS/JS into native Android APKs, Play Store AABs, and iOS packages with true fullscreen, dynamic theme-color syncing, splash screens, and Duolingo-style dynamic app icon swapping.',
   openGraph: {
     title: 'LARP - Offline Web-to-Native App Bundler API',
