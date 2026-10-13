@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
           const candidate = file as { path?: unknown; content?: unknown };
           return typeof candidate.path === 'string' && typeof candidate.content === 'string';
         })
-        .map((file) => {
+        .map((file: { path: string; content: string; isBinary?: boolean }) => {
           const normalizedPath = file.path.replaceAll('\\', '/').replace(/^\.\//, '');
           if (!normalizedPath || normalizedPath.startsWith('/') || normalizedPath.split('/').includes('..')) {
             throw new Error(`Invalid file path: ${file.path}`);
