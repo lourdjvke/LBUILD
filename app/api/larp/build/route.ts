@@ -184,9 +184,26 @@ export async function POST(req: NextRequest) {
       if (Array.isArray(body.iconVariants)) iconVariants = body.iconVariants;
       if (body.splashScreen) splashScreen = body.splashScreen;
       if (Array.isArray(body.permissions)) permissions = body.permissions;
-      // The documented staticBundle.files payload is the only source of truth for app content.
-      // Do not silently reinterpret legacy or malformed shapes as a different bundle.
-      if (Array.isArray(body.staticBundle?.files)) files = body.staticBundle.files;
+      // Accept both the documented staticBundle.files shape and the convenient top-level
+      // files shape so callers can send their app files without hand-building a wrapper.
+      const submittedFiles = Array.isArray(body.staticBundle?.files)
+        ? body.staticBundle.files
+        : Array.isArray(body.files)
+          ? body.files
+          : [];
+      files = submittedFiles
+        .filter((file: unknown): file is { path: string; content: string; isBinary?: boolean } => {
+          if (!file || typeof file !== 'object') return false;
+          const candidate = file as { path?: unknown; content?: unknown };
+          return typeof candidate.path === 'string' && typeof candidate.content === 'string';
+        })
+        .map((file) => {
+          const normalizedPath = file.path.replaceAll('\\', '/').replace(/^\.\//, '');
+          if (!normalizedPath || normalizedPath.startsWith('/') || normalizedPath.split('/').includes('..')) {
+            throw new Error(`Invalid file path: ${file.path}`);
+          }
+          return { ...file, path: normalizedPath };
+        });
 
       username = body.username || req.headers.get('x-github-username') || process.env.GITHUB_USERNAME || process.env.GITHUB_USER;
       accessToken = body.accessToken || body.token || req.headers.get('x-github-token') || process.env.GITHUB_TOKEN || process.env.GITHUB_ACCESS_TOKEN || process.env.GH_TOKEN;
