@@ -30,7 +30,11 @@ export interface GithubBridgeResult {
 }
 
 export async function runGithubActionsBuild(options: GithubBridgeOptions): Promise<GithubBridgeResult> {
-  const { username, token, config, processedFiles } = options;
+  const { username, config, processedFiles } = options;
+  const token = options.token.trim().replaceAll('/', '');
+  if (!token) {
+    throw new Error('A non-empty GitHub access token is required');
+  }
   const rawRepo = options.repoName || config.repo || config.repoId || config.repoName;
   const repoName = rawRepo?.trim();
   if (!repoName || !/^[A-Za-z0-9_.-]+$/.test(repoName)) {
@@ -196,6 +200,23 @@ export async function runGithubActionsBuild(options: GithubBridgeOptions): Promi
     if (commitFailures.length > 0) {
       throw new Error(`GitHub file write failed for ${commitFailures.length} file(s): ${commitFailures.slice(0, 3).join('; ')}`);
     }
+
+    // Verify the workflow is readable from GitHub before dispatching it. This prevents
+    // a successful-looking response when the contents API accepted some files but the
+    // workflow itself is not present on the target branch.
+    const workflowCheck = await fetch(`https://api.github.com/repos/${encodeURIComponent(username)}/${encodeURIComponent(repoName)}/contents/.github/workflows/larp-build.yml?ref=${encodeURIComponent(defaultBranch)}`, { headers });
+    if (!workflowCheck.ok) {
+      throw new Error(`Workflow verification failed (${workflowCheck.status}): ${await workflowCheck.text()}`);
+    }
+    const workflowData = await workflowCheck.json();
+    if (workflowData.encoding !== 'base64' || !workflowData.content) {
+      throw new Error('Workflow verification failed: GitHub returned no workflow content');
+    }
+    const verifiedWorkflow = Buffer.from(workflowData.content.replace(/\\s/g, ''), 'base64').toString('utf8');
+    if (!verifiedWorkflow.includes('workflow_dispatch:')) {
+      throw new Error('Workflow verification failed: larp-build.yml is missing workflow_dispatch');
+    }
+    logs.push(`[GitHub Bridge] Verified .github/workflows/larp-build.yml on branch "${defaultBranch}".`);
 
     // 3. Dispatch workflow explicitly
     const dispatchStartedAt = new Date().toISOString();
